@@ -1,0 +1,37 @@
+# Discord Conversation Synthesizer Configuration
+# Copy this file and customize for your server
+
+discord:
+  token: ${DISCORD_TOKEN}
+
+server:
+  id: "YOUR_SERVER_ID"
+  name: "Your Server Name"
+  channels:
+    - id: "YOUR_CHANNEL_ID"
+      name: "general"
+      enabled: true
+
+segmentation:
+  temporal_gap_hours: 24
+  min_messages_per_conversation: 3
+
+synthesis:
+  model: "claude-opus-4-5-20250514"
+  max_tokens: 4096
+  temperature: 0.3
+  prompt_file: "./config/prompts/synthesis.md"
+
+export:
+  vault_path: "./output"
+  filename_format: "{date}_{slug}.md"
+  generate_topic_indexes: true
+  archive_versions: true
+
+privacy:
+  excluded_user_ids: []
+  redaction_placeholder: "[message redacted]"
+
+logging:
+  level: "INFO"
+  file: "./logs/synthesizer.log"

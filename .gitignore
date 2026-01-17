@@ -1,0 +1,31 @@
+# Credentials (NEVER commit)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
+
+# Output (generated files)
+output/*
+!output/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
