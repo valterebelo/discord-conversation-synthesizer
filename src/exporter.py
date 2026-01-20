@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 from collections import defaultdict
 
-from .models import SynthesizedNote, ProcessingState, RunResult
+from .models import SynthesizedNote, ProcessingState, RunResult, Conversation
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ class Exporter:
             self.vault_path / "topics",
             self.vault_path / "participants",
             self.vault_path / "_meta",
+            self.vault_path / "_transcripts",
         ]
 
         for dir_path in dirs:
@@ -111,6 +112,50 @@ class Exporter:
         # Copy to archive
         shutil.copy2(file_path, archive_path)
         logger.info(f"Archived previous version: {versioned_name}")
+
+    def save_transcript(self, conversation: Conversation) -> Path:
+        """
+        Save the original transcript of a conversation.
+
+        Args:
+            conversation: The conversation to save
+
+        Returns:
+            Path to the saved transcript file
+        """
+        transcripts_dir = self.vault_path / "_transcripts"
+        transcripts_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename from conversation ID
+        # Clean the ID to be filesystem-safe
+        safe_id = conversation.id.replace("/", "_").replace(":", "_")
+        file_path = transcripts_dir / f"{safe_id}.txt"
+
+        # Write the transcript
+        transcript = conversation.to_transcript()
+        file_path.write_text(transcript, encoding="utf-8")
+
+        logger.info(f"Saved transcript: {file_path.name}")
+        return file_path
+
+    def export_with_transcript(
+        self,
+        note: SynthesizedNote,
+        conversation: Conversation
+    ) -> tuple[Path, Path]:
+        """
+        Export a note and its original transcript.
+
+        Args:
+            note: The synthesized note
+            conversation: The original conversation
+
+        Returns:
+            Tuple of (note_path, transcript_path)
+        """
+        note_path = self.export_note(note)
+        transcript_path = self.save_transcript(conversation)
+        return note_path, transcript_path
 
     def export_batch(self, notes: list[SynthesizedNote]) -> list[Path]:
         """

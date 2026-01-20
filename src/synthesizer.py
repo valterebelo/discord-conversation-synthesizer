@@ -305,7 +305,12 @@ related: ["[[Related Topic 1]]", "[[Related Topic 2]]"]
         # Extract sections from body
         sections = self._extract_sections(body)
 
-        # Build the note
+        # Calculate timespan
+        time_start = conversation.timestamp_start.strftime("%H:%M")
+        time_end = conversation.timestamp_end.strftime("%H:%M")
+        timespan = f"{time_start} - {time_end} UTC"
+
+        # Build the note with full traceability
         note = SynthesizedNote(
             conversation_id=conversation.id,
             title=frontmatter.get("title", self._generate_title(conversation)),
@@ -320,9 +325,15 @@ related: ["[[Related Topic 1]]", "[[Related Topic 2]]"]
             tension_points=sections.get("points of tension", "No tension points identified."),
             connections=sections.get("connections", "No connections identified."),
             raw_insights=sections.get("raw insights"),
+            attachments=conversation.all_attachments,
             token_usage=input_tokens + output_tokens,
             cost_usd=self._calculate_cost(input_tokens, output_tokens),
             raw_response=response_text,
+            timespan=timespan,
+            # Traceability fields for reconstruction
+            message_ids=conversation.message_ids,
+            server_id=conversation.server_id,
+            channel_id=conversation.channel_id,
         )
 
         return note
@@ -377,6 +388,11 @@ related: ["[[Related Topic 1]]", "[[Related Topic 2]]"]
         Looks for ## headers and captures content until next header.
         """
         sections = {}
+
+        # Ensure body starts with newline for consistent splitting
+        # (handles case where body starts directly with "## Section")
+        if body.startswith("##"):
+            body = "\n" + body
 
         # Split by ## headers
         parts = re.split(r'\n##\s+', body)

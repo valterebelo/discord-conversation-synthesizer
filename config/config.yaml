@@ -5,11 +5,20 @@ discord:
   token: ${DISCORD_TOKEN}
 
 server:
-  id: "YOUR_SERVER_ID"
-  name: "Your Server Name"
+  id: "1446439860184420426"
+  name: "SysLS"
   channels:
-    - id: "YOUR_CHANNEL_ID"
-      name: "general"
+    - id: "1448584017644621844"
+      name: "article-discussions"
+      enabled: true
+    - id: "1448423959136698519"
+      name: "content-suggestions" 
+      enabled: true
+    - id: "1458247339037819092"
+      name: "dex-discussion" 
+      enabled: true
+    - id: "1446439860742127638"
+      name: "general" 
       enabled: true
 
 segmentation:
@@ -17,7 +26,7 @@ segmentation:
   min_messages_per_conversation: 3
 
 synthesis:
-  model: "claude-opus-4-5-20250514"
+  model: "claude-opus-4-5-20251101"
   max_tokens: 4096
   temperature: 0.3
   prompt_file: "./config/prompts/synthesis.md"

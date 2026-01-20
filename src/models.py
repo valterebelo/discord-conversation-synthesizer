@@ -55,10 +55,34 @@ class Message:
         """Check if this message is a reply to another message."""
         return self.reply_to is not None
 
-    def to_transcript_line(self) -> str:
+    def to_transcript_line(self, include_id: bool = True) -> str:
         """Format message for inclusion in synthesis prompt."""
         timestamp_str = self.timestamp.strftime("%H:%M:%S")
-        return f"[{timestamp_str}] {self.author_name}: {self.content}"
+
+        if include_id:
+            # Include message ID for traceability
+            line = f"[{self.id}] [{timestamp_str}] {self.author_name}: {self.content}"
+        else:
+            line = f"[{timestamp_str}] {self.author_name}: {self.content}"
+
+        # Add attachment references
+        if self.attachments:
+            attachment_refs = []
+            for url in self.attachments:
+                # Detect type from URL
+                if any(ext in url.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                    attachment_refs.append(f"[Image: {url}]")
+                elif any(ext in url.lower() for ext in ['.pdf']):
+                    attachment_refs.append(f"[PDF: {url}]")
+                else:
+                    attachment_refs.append(f"[Attachment: {url}]")
+            line += " " + " ".join(attachment_refs)
+
+        return line
+
+    def get_discord_url(self, server_id: str, channel_id: str) -> str:
+        """Generate Discord deep link to this message."""
+        return f"https://discord.com/channels/{server_id}/{channel_id}/{self.id}"
 
 
 @dataclass
@@ -80,6 +104,7 @@ class Conversation:
         thread_name: Thread name if from a thread
         timestamp_start: Earliest message timestamp
         timestamp_end: Latest message timestamp
+        server_id: Discord server/guild ID (for deep links)
     """
     id: str
     channel_id: str
@@ -88,6 +113,7 @@ class Conversation:
     conversation_type: ConversationType
     thread_id: Optional[str] = None
     thread_name: Optional[str] = None
+    server_id: Optional[str] = None
 
     @property
     def timestamp_start(self) -> datetime:
@@ -120,6 +146,24 @@ class Conversation:
         return len(self.messages)
 
     @property
+    def message_ids(self) -> list[str]:
+        """Get all message IDs in chronological order."""
+        return [m.id for m in sorted(self.messages, key=lambda m: m.timestamp)]
+
+    @property
+    def all_attachments(self) -> list[dict]:
+        """Get all attachments from all messages with metadata."""
+        attachments = []
+        for msg in self.messages:
+            for url in msg.attachments:
+                attachments.append({
+                    "url": url,
+                    "author": msg.author_name,
+                    "timestamp": msg.timestamp,
+                })
+        return attachments
+
+    @property
     def duration_minutes(self) -> float:
         """Get the duration of the conversation in minutes."""
         if len(self.messages) < 2:
@@ -127,9 +171,12 @@ class Conversation:
         delta = self.timestamp_end - self.timestamp_start
         return delta.total_seconds() / 60
 
-    def to_transcript(self) -> str:
+    def to_transcript(self, include_ids: bool = True) -> str:
         """
         Format the conversation as a transcript for the synthesis prompt.
+
+        Args:
+            include_ids: If True, include message IDs for traceability
 
         Returns a formatted string with metadata header and message lines.
         """
@@ -148,11 +195,14 @@ class Conversation:
         header_parts.append(f"PARTICIPANTS: {', '.join(self.participants)}")
         header_parts.append(f"MESSAGE COUNT: {self.message_count}")
 
+        if include_ids:
+            header_parts.append(f"MESSAGE IDS: {', '.join(self.message_ids)}")
+
         header = "\n".join(header_parts)
 
         # Sort messages by timestamp and format
         sorted_messages = sorted(self.messages, key=lambda m: m.timestamp)
-        message_lines = [msg.to_transcript_line() for msg in sorted_messages]
+        message_lines = [msg.to_transcript_line(include_id=include_ids) for msg in sorted_messages]
 
         return f"{header}\n\n" + "\n".join(message_lines)
 
@@ -221,6 +271,7 @@ class SynthesizedNote:
         token_usage: Tokens used for this synthesis
         cost_usd: Estimated cost in USD
         raw_response: The raw response from Claude (for debugging)
+        timespan: Time range of conversation (e.g., "10:30 - 14:45 UTC")
     """
     conversation_id: str
     title: str
@@ -235,9 +286,15 @@ class SynthesizedNote:
     tension_points: str
     connections: str
     raw_insights: Optional[str] = None
+    attachments: list[dict] = field(default_factory=list)  # [{url, author, timestamp}]
     token_usage: int = 0
     cost_usd: float = 0.0
     raw_response: Optional[str] = None
+    timespan: Optional[str] = None  # e.g., "10:30 - 14:45 UTC"
+    # Traceability fields for reconstruction
+    message_ids: list[str] = field(default_factory=list)  # All message IDs in this conversation
+    server_id: Optional[str] = None  # Discord server ID for deep links
+    channel_id: Optional[str] = None  # Discord channel ID for deep links
 
     def to_markdown(self) -> str:
         """
@@ -250,12 +307,16 @@ class SynthesizedNote:
             "---",
             f'title: "{self.title}"',
             f'date: "{self.date}"',
+        ]
+        if self.timespan:
+            frontmatter_lines.append(f'timespan: "{self.timespan}"')
+        frontmatter_lines.extend([
             f'participants: {self.participants}',
             f'channel: "{self.channel}"',
             f'tags: {self.tags}',
             f'related: {self.related}',
             "---",
-        ]
+        ])
         frontmatter = "\n".join(frontmatter_lines)
 
         # Build body
@@ -289,6 +350,61 @@ class SynthesizedNote:
                 "## Raw Insights",
                 "",
                 self.raw_insights,
+            ])
+
+        # Add attachments section if there are images/files
+        if self.attachments:
+            body_parts.extend([
+                "",
+                "## Media & Attachments",
+                "",
+            ])
+            for att in self.attachments:
+                url = att.get("url", "")
+                author = att.get("author", "unknown")
+                # Check if it's an image
+                if any(ext in url.lower() for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp']):
+                    body_parts.append(f"![Image shared by {author}]({url})")
+                    body_parts.append("")
+                else:
+                    body_parts.append(f"- [Attachment by {author}]({url})")
+
+        # Add source traceability section
+        if self.message_ids:
+            body_parts.extend([
+                "",
+                "---",
+                "",
+                "<details>",
+                "<summary>Source Messages (click to expand)</summary>",
+                "",
+                f"**Conversation ID:** `{self.conversation_id}`",
+                f"**Message count:** {len(self.message_ids)}",
+                "",
+            ])
+
+            # If we have server/channel IDs, generate Discord deep links
+            if self.server_id and self.channel_id:
+                body_parts.append("**Discord Links:**")
+                body_parts.append("")
+                # Show first and last few message links
+                ids_to_show = self.message_ids[:3] + (["..."] if len(self.message_ids) > 6 else []) + self.message_ids[-3:] if len(self.message_ids) > 6 else self.message_ids
+                for msg_id in ids_to_show:
+                    if msg_id == "...":
+                        body_parts.append(f"- ...")
+                    else:
+                        url = f"https://discord.com/channels/{self.server_id}/{self.channel_id}/{msg_id}"
+                        body_parts.append(f"- [`{msg_id}`]({url})")
+            else:
+                body_parts.append("**Message IDs:**")
+                body_parts.append("")
+                body_parts.append(f"`{', '.join(self.message_ids[:10])}`")
+                if len(self.message_ids) > 10:
+                    body_parts.append(f"... and {len(self.message_ids) - 10} more")
+
+            body_parts.extend([
+                "",
+                "</details>",
             ])
 
         body = "\n".join(body_parts)

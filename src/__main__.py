@@ -21,6 +21,7 @@ from .fetcher import Fetcher
 from .segmenter import Segmenter, segment_from_fixtures
 from .synthesizer import Synthesizer, SynthesisResult
 from .exporter import Exporter
+from .stats import compute_all_stats, save_stats, load_notes_from_vault
 
 logger = logging.getLogger("synthesizer")
 
@@ -194,6 +195,56 @@ async def run_with_mocks(config: Config) -> RunResult:
     exporter.save_run_result(run_result)
 
     return run_result
+
+
+async def run_stats_only(config: Config) -> None:
+    """
+    Generate statistics from existing vault data.
+
+    Does not process new conversations or call any APIs.
+    """
+    vault_path = Path(config.export.vault_path)
+
+    logger.info(f"Generating stats from vault: {vault_path}")
+
+    # Load existing notes for topic stats
+    notes = load_notes_from_vault(vault_path)
+
+    if not notes:
+        logger.warning("No notes found in vault. Run the synthesizer first.")
+        print("\n  No notes found in vault. Run the synthesizer first to generate content.\n")
+        return
+
+    # For stats, we need conversations. If we don't have them loaded,
+    # we can still generate partial stats from notes
+    logger.info(f"Found {len(notes)} notes in vault")
+
+    # Since we don't have conversations loaded, we'll generate stats from notes only
+    # This gives us topic stats but not participant/activity stats
+    from .stats import compute_topic_stats
+    topic_stats = compute_topic_stats(notes)
+
+    stats = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "notes_analyzed": len(notes),
+        "topics": topic_stats,
+        "note": "Partial stats from notes only. Run full synthesis for complete participant/activity stats."
+    }
+
+    # Save stats
+    stats_path = vault_path / "_meta" / "stats.json"
+    save_stats(stats, stats_path)
+
+    print("\n" + "=" * 60)
+    print("  Statistics Generated")
+    print("=" * 60)
+    print(f"  Notes analyzed: {len(notes)}")
+    print(f"  Topics found: {len(topic_stats['frequency'])}")
+    print(f"  Top topics:")
+    for tag, count in list(topic_stats['frequency'].items())[:5]:
+        print(f"    - {tag}: {count} conversations")
+    print(f"\n  Stats saved to: {stats_path}")
+    print("=" * 60 + "\n")
 
 
 async def run_with_real_services(config: Config) -> RunResult:
@@ -423,6 +474,12 @@ Examples:
         help="Process all message history (ignore previous state)"
     )
 
+    parser.add_argument(
+        "--stats-only",
+        action="store_true",
+        help="Generate statistics from existing vault data without processing new conversations"
+    )
+
     args = parser.parse_args()
 
     # Load configuration
@@ -447,6 +504,16 @@ Examples:
 
     if config.dry_run:
         logger.info("DRY RUN mode - no changes will be made")
+
+    # Handle stats-only mode
+    if args.stats_only:
+        logger.info("STATS ONLY mode - generating statistics from existing vault")
+        try:
+            await run_stats_only(config)
+            return 0
+        except Exception as e:
+            logger.exception(f"Stats generation failed: {e}")
+            return 1
 
     try:
         if config.use_mock:
